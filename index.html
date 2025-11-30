@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Retro Image Calculator</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- Firebase SDKs (Compat - Stable for Browser) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+    <!-- React & ReactDOM (Global UMD) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+    <!-- Babel Standalone -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Import Map (Only for @google/genai) -->
+    <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.run/@google/genai",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/"
+  }
+}
+</script>
+
+    <style>
+      body { font-family: 'Roboto Mono', monospace; background-color: #111827; }
+      .font-orbitron { font-family: 'Orbitron', sans-serif; }
+      
+      @keyframes shake {
+        10%, 90% { transform: translate3d(-1px, 0, 0); }
+        20%, 80% { transform: translate3d(2px, 0, 0); }
+        30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+        40%, 60% { transform: translate3d(4px, 0, 0); }
+      }
+      .animate-shake { animation: shake 0.82s cubic-bezier(.36,.07,.19,.97) both; }
+      
+      @keyframes press {
+        0% { transform: scale(1); filter: brightness(1); }
+        50% { transform: scale(0.92); filter: brightness(1.2); }
+        100% { transform: scale(1); filter: brightness(1); }
+      }
+      .animate-press { animation: press 0.2s ease-in-out; }
+      
+      /* Hide scrollbar for history panel */
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+      import { GoogleGenAI } from "@google/genai";
+      
+      // ==============================================================================
+      // 👇👇👇 GOOGLE GEMINI API KEY 👇👇👇
+      // ==============================================================================
+      
+      const USER_API_KEY = "AIzaSyA4k0852mfycQUF7dmwpc61iZyf1WHnYt4"; 
+      
+      // ==============================================================================
+
+      // Access global React/Firebase variables
+      const { useState, useEffect, useCallback } = React;
+      const firebase = window.firebase;
+
+      // Firebase Config
+      const firebaseConfig = {
+        apiKey: "AIzaSyDEsrVasCMnh8pdTZwhi8SaxRMx5kF62oE",
+        authDomain: "app-c71d8.firebaseapp.com",
+        databaseURL: "https://app-c71d8-default-rtdb.firebaseio.com",
+        projectId: "app-c71d8",
+        storageBucket: "app-c71d8.appspot.com",
+        messagingSenderId: "503361105354",
+        appId: "1:503361105354:web:357b2bea7e1d298dab3333",
+        measurementId: "G-G99KXE6F2D"
+      };
+
+      // Initialize Firebase
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
+      const auth = firebase.auth();
+      const db = firebase.database();
+
+      // Initialize Gemini
+      const isKeyConfigured = USER_API_KEY && USER_API_KEY.startsWith("AIza");
+      
+      let ai;
+      if (isKeyConfigured) {
+         ai = new GoogleGenAI({ apiKey: USER_API_KEY });
+      }
+
+      // --- THEMES ---
+      const THEMES = [
+        {
+          id: 'classic',
+          name: 'Classic Dark',
+          bgApp: 'bg-gray-300',
+          bgBody: 'bg-gray-800 border-gray-900',
+          screen: 'bg-green-900/50 text-green-300 border-black/20',
+          logo: 'text-yellow-300',
+          btnNum: 'bg-gray-600 hover:bg-gray-500 text-white',
+          btnFunc: 'bg-gray-700 hover:bg-gray-600 text-white',
+          btnAction: 'bg-orange-600 hover:bg-orange-500 text-white',
+          btnClear: 'bg-red-700 hover:bg-red-600 text-white',
+          btnHighlight: 'bg-blue-600 hover:bg-blue-500 text-white',
+          input: 'bg-transparent text-green-300 placeholder-green-700/80',
+          previewColor: '#1f2937'
+        },
+        {
+          id: 'beige',
+          name: 'Retro Beige',
+          bgApp: 'bg-stone-200',
+          bgBody: 'bg-[#e3dac9] border-[#d4c5b0]',
+          screen: 'bg-[#9ea792] text-black border-stone-600/20',
+          logo: 'text-stone-800',
+          btnNum: 'bg-stone-800 hover:bg-stone-700 text-white',
+          btnFunc: 'bg-stone-600 hover:bg-stone-500 text-white',
+          btnAction: 'bg-orange-500 hover:bg-orange-400 text-white',
+          btnClear: 'bg-red-800 hover:bg-red-700 text-white',
+          btnHighlight: 'bg-blue-700 hover:bg-blue-600 text-white',
+          input: 'bg-transparent text-black placeholder-stone-700',
+          previewColor: '#e3dac9'
+        },
+        {
+          id: 'cyberpunk',
+          name: 'Cyberpunk',
+          bgApp: 'bg-purple-900',
+          bgBody: 'bg-black border-pink-500',
+          screen: 'bg-black text-cyan-400 border-cyan-500/50',
+          logo: 'text-pink-500',
+          btnNum: 'bg-gray-900 hover:bg-gray-800 text-cyan-300 border border-cyan-500/30',
+          btnFunc: 'bg-gray-900 hover:bg-gray-800 text-pink-300 border border-pink-500/30',
+          btnAction: 'bg-cyan-600 hover:bg-cyan-500 text-black font-bold',
+          btnClear: 'bg-pink-600 hover:bg-pink-500 text-black font-bold',
+          btnHighlight: 'bg-yellow-400 hover:bg-yellow-300 text-black',
+          input: 'bg-transparent text-cyan-300 placeholder-cyan-700',
+          previewColor: '#000000'
+        },
+        {
+          id: 'matrix',
+          name: 'The Matrix',
+          bgApp: 'bg-black',
+          bgBody: 'bg-black border-green-600',
+          screen: 'bg-black text-green-500 border-green-800',
+          logo: 'text-green-500',
+          btnNum: 'bg-green-900/20 hover:bg-green-900/40 text-green-500 border border-green-800',
+          btnFunc: 'bg-green-900/20 hover:bg-green-900/40 text-green-400 border border-green-800',
+          btnAction: 'bg-green-700 hover:bg-green-600 text-black',
+          btnClear: 'bg-green-900 hover:bg-green-800 text-green-200',
+          btnHighlight: 'bg-green-500 hover:bg-green-400 text-black',
+          input: 'bg-transparent text-green-500 placeholder-green-800',
+          previewColor: '#052e05'
+        },
+        {
+          id: 'ocean',
+          name: 'Deep Ocean',
+          bgApp: 'bg-blue-200',
+          bgBody: 'bg-slate-800 border-slate-900',
+          screen: 'bg-blue-900/50 text-blue-200 border-blue-500/30',
+          logo: 'text-blue-400',
+          btnNum: 'bg-slate-600 hover:bg-slate-500 text-blue-100',
+          btnFunc: 'bg-slate-700 hover:bg-slate-600 text-blue-200',
+          btnAction: 'bg-blue-600 hover:bg-blue-500 text-white',
+          btnClear: 'bg-indigo-600 hover:bg-indigo-500 text-white',
+          btnHighlight: 'bg-cyan-500 hover:bg-cyan-400 text-white',
+          input: 'bg-transparent text-blue-200 placeholder-blue-500',
+          previewColor: '#1e293b'
+        },
+        {
+          id: 'sakura',
+          name: 'Sakura Pink',
+          bgApp: 'bg-pink-100',
+          bgBody: 'bg-pink-50 border-pink-200',
+          screen: 'bg-white text-pink-600 border-pink-300',
+          logo: 'text-pink-500',
+          btnNum: 'bg-white hover:bg-pink-50 text-pink-500 border border-pink-100 shadow-sm',
+          btnFunc: 'bg-pink-100 hover:bg-pink-200 text-pink-600',
+          btnAction: 'bg-pink-400 hover:bg-pink-300 text-white',
+          btnClear: 'bg-red-400 hover:bg-red-300 text-white',
+          btnHighlight: 'bg-purple-400 hover:bg-purple-300 text-white',
+          input: 'bg-transparent text-pink-600 placeholder-pink-300',
+          previewColor: '#fce7f3'
+        },
+        {
+          id: 'gold',
+          name: 'Luxury Gold',
+          bgApp: 'bg-gray-900',
+          bgBody: 'bg-neutral-900 border-yellow-600',
+          screen: 'bg-neutral-800 text-yellow-500 border-yellow-700',
+          logo: 'text-yellow-400',
+          btnNum: 'bg-neutral-800 hover:bg-neutral-700 text-yellow-200 border border-yellow-900',
+          btnFunc: 'bg-neutral-800 hover:bg-neutral-700 text-yellow-600',
+          btnAction: 'bg-yellow-700 hover:bg-yellow-600 text-white',
+          btnClear: 'bg-yellow-900 hover:bg-yellow-800 text-yellow-200',
+          btnHighlight: 'bg-yellow-500 hover:bg-yellow-400 text-black',
+          input: 'bg-transparent text-yellow-500 placeholder-yellow-800',
+          previewColor: '#171717'
+        },
+        {
+          id: 'monochrome',
+          name: 'Monochrome',
+          bgApp: 'bg-gray-500',
+          bgBody: 'bg-white border-gray-300',
+          screen: 'bg-gray-100 text-black border-gray-300',
+          logo: 'text-black',
+          btnNum: 'bg-gray-100 hover:bg-gray-200 text-black border border-gray-200',
+          btnFunc: 'bg-gray-200 hover:bg-gray-300 text-black',
+          btnAction: 'bg-black hover:bg-gray-800 text-white',
+          btnClear: 'bg-gray-800 hover:bg-gray-700 text-white',
+          btnHighlight: 'bg-gray-600 hover:bg-gray-500 text-white',
+          input: 'bg-transparent text-black placeholder-gray-400',
+          previewColor: '#ffffff'
+        },
+        {
+          id: 'vampire',
+          name: 'Vampire',
+          bgApp: 'bg-red-950',
+          bgBody: 'bg-red-900 border-black',
+          screen: 'bg-black text-red-600 border-red-900',
+          logo: 'text-red-500',
+          btnNum: 'bg-black hover:bg-gray-900 text-red-700 border border-red-900/30',
+          btnFunc: 'bg-black hover:bg-gray-900 text-red-900',
+          btnAction: 'bg-red-700 hover:bg-red-600 text-black',
+          btnClear: 'bg-red-950 hover:bg-red-900 text-red-500 border border-red-800',
+          btnHighlight: 'bg-white hover:bg-gray-200 text-black',
+          input: 'bg-transparent text-red-600 placeholder-red-900',
+          previewColor: '#7f1d1d'
+        },
+        {
+          id: 'gameboy',
+          name: 'Purple Clear',
+          bgApp: 'bg-purple-300',
+          bgBody: 'bg-purple-800/90 border-purple-900 backdrop-blur-sm',
+          screen: 'bg-[#8bac0f] text-[#0f380f] border-black/20',
+          logo: 'text-white/80',
+          btnNum: 'bg-purple-700/80 hover:bg-purple-600/80 text-white border border-purple-500/30',
+          btnFunc: 'bg-purple-900/50 hover:bg-purple-800/50 text-purple-200',
+          btnAction: 'bg-pink-600 hover:bg-pink-500 text-white shadow-lg',
+          btnClear: 'bg-gray-800 hover:bg-gray-700 text-white',
+          btnHighlight: 'bg-blue-500 hover:bg-blue-400 text-white',
+          input: 'bg-transparent text-[#0f380f] placeholder-[#0f380f]/50',
+          previewColor: '#6b21a8'
+        }
+      ];
+
+      const STYLE_KEYWORDS = {
+        '1': 'Cyberpunk', '2': 'Realistic', '3': '3D Render', '4': 'Steampunk',
+        '5': 'Fantasy Art', '6': 'Vintage', '7': 'Minimalist', '8': 'Abstract',
+        '9': 'Impressionism', '0': 'Low Poly',
+      };
+
+      // --- COMPONENTS ---
+      
+      const DownloadIcon = (props) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" {...props}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+        </svg>
+      );
+
+      const HistoryIcon = (props) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+        </svg>
+      );
+
+      const ProfileIcon = (props) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+        </svg>
+      );
+
+      const LogoutIcon = (props) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" {...props}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
+        </svg>
+      );
+
+      const CalculatorButton = ({ onClick, children, className, disabled = false, isPressed = false }) => {
+        return (
+          <button
+            onClick={onClick}
+            disabled={disabled}
+            className={`h-14 font-bold text-2xl rounded-lg shadow-md transition-transform transform active:scale-95 active:shadow-inner focus:outline-none focus:ring-2 focus:ring-opacity-50 flex items-center justify-center ${className} ${disabled ? 'cursor-not-allowed opacity-50' : ''} ${isPressed ? 'animate-press' : ''}`}
+          >
+            {children}
+          </button>
+        );
+      };
+
+      const CalculatorDisplay = ({ imageUrl, isLoading, error, theme }) => {
+        return (
+          <div className={`aspect-square w-full border-2 rounded-lg shadow-inner flex items-center justify-center overflow-hidden relative ${theme.screen}`}>
+            {isLoading ? (
+              <div className="flex flex-col items-center justify-center h-full opacity-80">
+                <div className={`animate-spin rounded-full h-12 w-12 border-b-2 border-current`}></div>
+                <p className="mt-4 text-lg font-orbitron tracking-widest animate-pulse">CALCULATING...</p>
+              </div>
+            ) : error ? (
+              <div className="flex flex-col items-center justify-center text-red-500/80 p-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="mt-2 font-orbitron">ERROR</p>
+              </div>
+            ) : imageUrl ? (
+              <img src={imageUrl} alt="Generated" className="w-full h-full object-cover" />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full p-4 opacity-70">
+                  <p className="font-orbitron text-center">IMAGE GENERATOR</p>
+                  <p className="text-xs text-center mt-2 opacity-80">Enter a prompt below.<br/>Use number keys for styles.</p>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      const Auth = () => {
+        const [isLogin, setIsLogin] = useState(true);
+        const [email, setEmail] = useState('');
+        const [password, setPassword] = useState('');
+        const [error, setError] = useState(null);
+        const [loading, setLoading] = useState(false);
+
+        const getErrorMessage = (errCode) => {
+          switch (errCode) {
+            case 'auth/invalid-credential':
+            case 'auth/user-not-found':
+            case 'auth/wrong-password': return 'Invalid email or password.';
+            case 'auth/email-already-in-use': return 'Account with this email already exists.';
+            case 'auth/weak-password': return 'Password should be at least 6 characters.';
+            case 'auth/invalid-email': return 'Please enter a valid email address.';
+            default: return 'Authentication failed. Please try again.';
+          }
+        };
+
+        const handleSubmit = async (e) => {
+          e.preventDefault();
+          setError(null);
+          setLoading(true);
+          
+          if (password.length < 6) {
+              setError("Password must be at least 6 characters long.");
+              setLoading(false);
+              return;
+          }
+
+          try {
+            if (isLogin) {
+              await auth.signInWithEmailAndPassword(email, password);
+            } else {
+              await auth.createUserWithEmailAndPassword(email, password);
+            }
+          } catch (err) {
+            console.error(err);
+            setError(getErrorMessage(err.code));
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        return (
+          <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+            <div className="w-full max-w-sm mx-auto bg-gray-800 border-4 border-gray-900 rounded-2xl p-6 shadow-2xl space-y-6">
+              <div className="text-center">
+                  <h1 className="font-orbitron text-2xl font-bold text-yellow-300">IMAGEN-82</h1>
+                  <p className="text-green-400 text-sm mt-1">{isLogin ? 'Login to continue' : 'Create an account'}</p>
+              </div>
+              
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" required className="w-full bg-gray-900 text-green-300 placeholder-green-700/80 border-2 border-gray-700 rounded-md p-2 focus:ring-yellow-400 focus:border-yellow-400 focus:outline-none" />
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" required className="w-full bg-gray-900 text-green-300 placeholder-green-700/80 border-2 border-gray-700 rounded-md p-2 focus:ring-yellow-400 focus:border-yellow-400 focus:outline-none" />
+                
+                {error && <p className="text-red-400 text-xs text-center font-bold bg-red-900/30 p-1 rounded">{error}</p>}
+                
+                <button type="submit" disabled={loading} className="w-full h-12 bg-orange-600 hover:bg-orange-500 text-white font-bold text-xl rounded-lg shadow-md transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed">
+                  {loading ? <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white mx-auto"></div> : (isLogin ? '=' : '+')}
+                </button>
+              </form>
+
+              <div className="text-center">
+                <button onClick={() => { setIsLogin(!isLogin); setError(null); }} className="text-green-400 hover:text-yellow-300 text-sm">
+                  {isLogin ? 'Need an account? Sign Up' : 'Have an account? Login'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const History = ({ user, onClose, onSelectImage }) => {
+        const [history, setHistory] = useState([]);
+        const [loading, setLoading] = useState(true);
+        const [error, setError] = useState(null);
+
+        useEffect(() => {
+          const historyRef = db.ref(`history/${user.uid}`).orderByChild('createdAt').limitToLast(50);
+          
+          historyRef.on('value', (snapshot) => {
+             const data = snapshot.val();
+             if (data) {
+                 const loadedHistory = Object.entries(data)
+                 .map(([id, value]) => ({ id, ...value }))
+                 .sort((a, b) => b.createdAt - a.createdAt);
+                 setHistory(loadedHistory);
+             } else {
+                 setHistory([]);
+             }
+             setLoading(false);
+          }, (err) => {
+              console.error(err);
+              setError("Could not load history.");
+              setLoading(false);
+          });
+
+          return () => historyRef.off();
+        }, [user.uid]);
+
+        return (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={onClose}>
+            <div className="w-full max-w-sm h-[80vh] bg-gray-800 border-4 border-gray-900 rounded-2xl p-4 shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4">
+                  <h2 className="font-orbitron text-xl font-bold text-yellow-300">HISTORY</h2>
+                  <button onClick={onClose} className="text-2xl text-red-500 hover:text-red-400">&times;</button>
+              </div>
+              <div className="flex-grow bg-gray-900/50 rounded-lg p-2 overflow-y-auto no-scrollbar">
+                {loading ? (
+                   <div className="flex items-center justify-center h-full text-green-300">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-300"></div>
+                   </div>
+                ) : error ? (
+                  <div className="text-red-400 text-center p-4">{error}</div>
+                ) : history.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-green-400 text-center">
+                      <p>No history yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {history.map(item => (
+                      <div key={item.id} className="bg-black/20 rounded-lg p-2 flex items-center gap-3 cursor-pointer hover:bg-black/40" onClick={() => onSelectImage(item.imageUrl, item.prompt)}>
+                        <img src={item.imageUrl} alt="thumbnail" className="w-16 h-16 object-cover rounded-md flex-shrink-0" />
+                        <div className="overflow-hidden">
+                          <p className="text-green-300 text-sm truncate">{item.prompt}</p>
+                          <p className="text-green-500 text-xs">{new Date(item.createdAt).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const ProfileModal = ({ user, onClose, onLogout, currentThemeId, onSelectTheme }) => {
+        return (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={onClose}>
+             <div className="w-full max-w-sm bg-gray-800 border-4 border-gray-700 rounded-2xl p-5 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-center">
+                    <h2 className="font-orbitron text-xl font-bold text-white">PROFILE</h2>
+                    <button onClick={onClose} className="text-2xl text-gray-400 hover:text-white">&times;</button>
+                </div>
+                
+                <div className="bg-gray-900 p-3 rounded-lg text-center">
+                    <div className="inline-block p-2 bg-gray-800 rounded-full mb-2">
+                        <ProfileIcon className="h-10 w-10 text-gray-300" />
+                    </div>
+                    <p className="text-gray-300 text-sm break-all">{user.email}</p>
+                </div>
+
+                <div>
+                    <h3 className="text-gray-400 text-xs font-bold uppercase mb-2">Select Theme</h3>
+                    <div className="grid grid-cols-5 gap-2">
+                        {THEMES.map(theme => (
+                            <button 
+                                key={theme.id}
+                                onClick={() => onSelectTheme(theme.id)}
+                                className={`aspect-square rounded-lg flex items-center justify-center border-2 transition-all ${currentThemeId === theme.id ? 'border-yellow-400 ring-2 ring-yellow-400/50 scale-110' : 'border-transparent hover:scale-105'}`}
+                                style={{ backgroundColor: theme.previewColor }}
+                                title={theme.name}
+                            >
+                                {currentThemeId === theme.id && <div className="w-2 h-2 bg-white rounded-full"></div>}
+                            </button>
+                        ))}
+                    </div>
+                    <p className="text-center text-gray-500 text-xs mt-2">{THEMES.find(t => t.id === currentThemeId)?.name}</p>
+                </div>
+
+                <button onClick={onLogout} className="w-full py-3 bg-red-700 hover:bg-red-600 text-white font-bold rounded-lg flex items-center justify-center gap-2">
+                    <LogoutIcon className="h-5 w-5" />
+                    LOGOUT
+                </button>
+             </div>
+          </div>
+        );
+      };
+
+      const App = () => {
+        const [prompt, setPrompt] = useState('');
+        const [imageUrl, setImageUrl] = useState(null);
+        const [isLoading, setIsLoading] = useState(false);
+        const [error, setError] = useState(null);
+        const [isShaking, setIsShaking] = useState(false);
+        const [pressedKey, setPressedKey] = useState(null);
+        const [aspectRatio, setAspectRatio] = useState('1:1');
+        const [user, setUser] = useState(null);
+        const [authReady, setAuthReady] = useState(false);
+        const [showHistory, setShowHistory] = useState(false);
+        const [showProfile, setShowProfile] = useState(false);
+        
+        // Theme State
+        const [themeId, setThemeId] = useState(() => localStorage.getItem('themeId') || 'classic');
+        const theme = THEMES.find(t => t.id === themeId) || THEMES[0];
+
+        const handleSelectTheme = (id) => {
+            setThemeId(id);
+            localStorage.setItem('themeId', id);
+        };
+
+        useEffect(() => {
+          const unsubscribe = auth.onAuthStateChanged((currentUser) => {
+            setUser(currentUser);
+            setAuthReady(true);
+          });
+          return () => unsubscribe();
+        }, []);
+
+        const handleLogout = () => {
+            auth.signOut();
+            setShowProfile(false);
+        };
+
+        const handleGenerate = async () => {
+          if (!isKeyConfigured) {
+             setError("API KEY MISSING! Edit index.html");
+             setIsShaking(true);
+             setTimeout(() => setIsShaking(false), 820);
+             return;
+          }
+
+          if (!prompt.trim()) {
+            setError('Prompt cannot be empty.');
+            setIsShaking(true);
+            setTimeout(() => setIsShaking(false), 820);
+            return;
+          }
+          
+          if (!navigator.onLine) {
+            setError("You're offline.");
+            return;
+          }
+
+          if (isLoading) return;
+          
+          setIsLoading(true);
+          setError(null);
+          setImageUrl(null);
+
+          try {
+            const response = await ai.models.generateContent({
+              model: 'gemini-2.5-flash-image',
+              contents: { parts: [{ text: prompt }] },
+              config: { imageConfig: { aspectRatio: aspectRatio } },
+            });
+
+            let foundImage = false;
+            if (response.candidates && response.candidates[0].content && response.candidates[0].content.parts) {
+               for (const part of response.candidates[0].content.parts) {
+                  if (part.inlineData && part.inlineData.data) {
+                      const newImageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                      setImageUrl(newImageUrl);
+                      foundImage = true;
+                      if (user) {
+                          try {
+                             db.ref(`history/${user.uid}`).push({
+                                 prompt: prompt,
+                                 imageUrl: newImageUrl,
+                                 createdAt: firebase.database.ServerValue.TIMESTAMP
+                             });
+                          } catch(e) { console.error("DB Save fail", e); }
+                      }
+                      break;
+                  }
+               }
+            }
+
+            if (!foundImage) {
+              const reason = response.candidates?.[0]?.finishReason;
+              if (reason === 'SAFETY') setError('Safety Block: Prompt policy violation.');
+              else setError('No image generated.');
+            }
+          } catch (e) {
+            console.error('API Error:', e);
+            const errStr = e.toString().toLowerCase();
+            if (errStr.includes('401')) setError('Invalid API Key.');
+            else if (errStr.includes('safety')) setError('Safety Block.');
+            else setError('Generation failed.');
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        const handleClear = () => {
+          setPrompt('');
+          setImageUrl(null);
+          setIsLoading(false);
+          setError(null);
+        };
+
+        const handleAppendKeyword = (keyword, key) => {
+          setPrompt(prev => `${prev} ${keyword}`.trim());
+          if (error) setError(null);
+          setPressedKey(key);
+          setTimeout(() => setPressedKey(null), 200);
+        };
+
+        const handleDownload = () => {
+            if (!imageUrl) return;
+            const link = document.createElement('a');
+            link.href = imageUrl;
+            link.download = `imagen82_${Date.now()}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+        
+        if (!authReady) {
+          return (
+            <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+              <div className="font-orbitron text-yellow-300 text-xl animate-pulse">LOADING...</div>
+            </div>
+          );
+        }
+
+        if (!user) return <Auth />;
+
+        return (
+          <>
+            {showHistory && <History user={user} onClose={() => setShowHistory(false)} onSelectImage={(img, p) => { setImageUrl(img); setPrompt(p); setShowHistory(false); }} />}
+            {showProfile && <ProfileModal user={user} onClose={() => setShowProfile(false)} onLogout={handleLogout} currentThemeId={themeId} onSelectTheme={handleSelectTheme} />}
+            
+            <div className={`min-h-screen ${theme.bgApp} flex items-center justify-center p-4 transition-colors duration-500`}>
+              <div className={`w-full max-w-sm mx-auto ${theme.bgBody} border-4 rounded-2xl p-4 shadow-2xl space-y-4 transition-colors duration-500`}>
+                <div className="flex justify-between items-center px-2">
+                  <h1 className={`font-orbitron text-xl font-bold ${theme.logo}`}>IMAGEN-82</h1>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setShowProfile(true)} className={`p-1 rounded-full hover:bg-black/20 ${theme.logo}`}>
+                      <ProfileIcon className="h-6 w-6" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-black/20 p-2 rounded-lg">
+                  <CalculatorDisplay imageUrl={imageUrl} isLoading={isLoading} error={error} theme={theme} />
+                  
+                  <div className="flex justify-end items-center mt-2 px-1">
+                    <label className={`font-orbitron text-[10px] mr-2 opacity-70 ${theme.screen.split(' ')[1]}`}>RATIO:</label>
+                    <select
+                      value={aspectRatio}
+                      onChange={(e) => setAspectRatio(e.target.value)}
+                      className={`bg-transparent border ${theme.screen.split(' ')[2]} font-orbitron text-xs rounded px-1 py-0.5 focus:outline-none cursor-pointer uppercase shadow-sm ${theme.screen.split(' ')[1]}`}
+                    >
+                      <option className="bg-gray-800 text-white" value="1:1">1:1 (SQ)</option>
+                      <option className="bg-gray-800 text-white" value="16:9">16:9 (L)</option>
+                      <option className="bg-gray-800 text-white" value="4:3">4:3 (L)</option>
+                      <option className="bg-gray-800 text-white" value="3:4">3:4 (P)</option>
+                      <option className="bg-gray-800 text-white" value="9:16">9:16 (P)</option>
+                    </select>
+                  </div>
+
+                  <div className={`mt-2 p-2 bg-black/10 rounded-md shadow-inner transition-all duration-100 ${error ? 'ring-2 ring-red-500' : ''} ${isShaking ? 'animate-shake' : ''}`}>
+                    <input
+                      type="text"
+                      value={prompt}
+                      onChange={(e) => { setPrompt(e.target.value); if(error) setError(null); }}
+                      onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
+                      placeholder="Type your prompt..."
+                      className={`w-full border-0 focus:ring-0 text-sm outline-none ${theme.input}`}
+                    />
+                    <div className="h-1 bg-current opacity-30 mt-1 rounded-full"></div>
+                  </div>
+                  {error && <p className="text-red-400 text-xs text-center mt-2 font-bold animate-pulse">{error}</p>}
+                </div>
+                
+                <div className="grid grid-cols-4 gap-3">
+                  <CalculatorButton onClick={handleClear} className={theme.btnClear}> C </CalculatorButton>
+                  <CalculatorButton onClick={() => setShowHistory(true)} className={theme.btnFunc}>
+                     <HistoryIcon className="h-6 w-6"/>
+                  </CalculatorButton>
+                  <CalculatorButton onClick={handleDownload} disabled={!imageUrl} className={imageUrl ? theme.btnHighlight : theme.btnFunc}>
+                    <DownloadIcon className="h-6 w-6"/>
+                  </CalculatorButton>
+                  <CalculatorButton onClick={() => handleAppendKeyword('Photorealistic', 'P')} isPressed={pressedKey === 'P'} className={theme.btnFunc}>P</CalculatorButton>
+                  
+                  {['7', '8', '9'].map(num => (
+                    <CalculatorButton key={num} onClick={() => handleAppendKeyword(STYLE_KEYWORDS[num], num)} isPressed={pressedKey === num} className={theme.btnNum}> {num} </CalculatorButton>
+                  ))}
+                  <CalculatorButton onClick={() => handleAppendKeyword('Anime', 'A')} isPressed={pressedKey === 'A'} className={theme.btnFunc}>A</CalculatorButton>
+
+                  {['4', '5', '6'].map(num => (
+                    <CalculatorButton key={num} onClick={() => handleAppendKeyword(STYLE_KEYWORDS[num], num)} isPressed={pressedKey === num} className={theme.btnNum}> {num} </CalculatorButton>
+                  ))}
+                  <CalculatorButton onClick={() => handleAppendKeyword('Oil Painting', 'O')} isPressed={pressedKey === 'O'} className={theme.btnFunc}>O</CalculatorButton>
+                  
+                  {['1', '2', '3'].map(num => (
+                    <CalculatorButton key={num} onClick={() => handleAppendKeyword(STYLE_KEYWORDS[num], num)} isPressed={pressedKey === num} className={theme.btnNum}> {num} </CalculatorButton>
+                  ))}
+                  <div className="row-span-2">
+                    <CalculatorButton onClick={handleGenerate} className={`${theme.btnAction} h-full w-full`}> = </CalculatorButton>
+                  </div>
+
+                  {['0'].map(num => (
+                    <CalculatorButton key={num} onClick={() => handleAppendKeyword(STYLE_KEYWORDS[num], num)} isPressed={pressedKey === num} className={theme.btnNum}> {num} </CalculatorButton>
+                  ))}
+                  <CalculatorButton onClick={() => handleAppendKeyword('Watercolor', 'W')} isPressed={pressedKey === 'W'} className={theme.btnFunc}>W</CalculatorButton>
+                  <CalculatorButton onClick={() => handleAppendKeyword('Vector', 'V')} isPressed={pressedKey === 'V'} className={theme.btnFunc}>V</CalculatorButton>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      };
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+{
+  "name": " Image Calculator",
+  "description": "An image generator styled like a retro Casio calculator. Type a prompt, use number keys for style modifiers, and generate AI images using Pollinations.ai.",
+  "requestFramePermissions": []
+}
